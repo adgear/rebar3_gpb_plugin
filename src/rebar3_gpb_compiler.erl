@@ -6,6 +6,7 @@
 -define(DEFAULT_PROTO_DIR, "proto").
 -define(DEFAULT_OUT_ERL_DIR, "src").
 -define(DEFAULT_OUT_HRL_DIR, "include").
+-define(DEFAULT_OUT_NIF_DIR, "priv").
 
 %% ===================================================================
 %% Public API
@@ -16,7 +17,11 @@
 compile(AppInfo, State) ->
     AppDir = rebar_app_info:dir(AppInfo),
     DepsDir = rebar_dir:deps_dir(State),
-    AppOutDir = rebar_app_info:out_dir(AppInfo),
+    {CmdArgs, _} = rebar_state:command_parsed_args(State),
+    AppOutDir = case proplists:get_value(out_dir, CmdArgs) of
+                    undefined -> rebar_app_info:out_dir(AppInfo);
+                    UserProvidedOutDir -> normalize_path(UserProvidedOutDir)
+                end,
     Opts = rebar_app_info:opts(AppInfo),
     {ok, GpbOpts0} = dict:find(gpb_opts, Opts),
     %% check if non-recursive
@@ -30,10 +35,17 @@ compile(AppInfo, State) ->
     TargetHrlDir = filename:join([AppOutDir,
                                   proplists:get_value(o_hrl, GpbOpts0,
                                                       ?DEFAULT_OUT_HRL_DIR)]),
+    TargetNifDir = filename:join([AppOutDir,
+                                  proplists:get_value(o_nif_cc, GpbOpts0,
+                                                      ?DEFAULT_OUT_NIF_DIR)]),
+
+
     rebar_api:debug("making sure that target erl dir ~p exists", [TargetErlDir]),
     ok = ensure_dir(TargetErlDir),
     rebar_api:debug("making sure that target hrl dir ~p exists", [TargetHrlDir]),
     ok = ensure_dir(TargetHrlDir),
+    rebar_api:debug("making sure that target nif dir ~p exists", [TargetNifDir]),
+    ok = ensure_dir(TargetNifDir),
     rebar_api:debug("reading proto files from ~p, generating \".erl\" to ~p "
                     "and \".hrl\" to ~p",
                     [SourceDirs, TargetErlDir, TargetHrlDir]),
@@ -61,7 +73,9 @@ compile(AppInfo, State) ->
                 proto_include_paths(AppDir, Protos,
                   default_include_opts(AppDir, DepsDir,
                       target_erl_opt(TargetErlDir,
-                          target_hrl_opt(TargetHrlDir, GpbOpts0))))),
+                          target_hrl_opt(TargetHrlDir, 
+                            target_nif_opt(TargetNifDir, GpbOpts0)    
+                        ))))),
 
     compile(Protos, TargetErlDir, GpbOpts, Protos),
     ok.
@@ -71,7 +85,11 @@ compile(AppInfo, State) ->
 clean(AppInfo, State) ->
     AppDir = rebar_app_info:dir(AppInfo),
     DepsDir = rebar_dir:deps_dir(State),
-    AppOutDir = rebar_app_info:out_dir(AppInfo),
+    {CmdArgs, _} = rebar_state:command_parsed_args(State),
+    AppOutDir = case proplists:get_value(out_dir, CmdArgs) of
+                    undefined -> rebar_app_info:out_dir(AppInfo);
+                    UserProvidedOutDir -> normalize_path(UserProvidedOutDir)
+                end,
     Opts = rebar_app_info:opts(AppInfo),
     {ok, GpbOpts} = dict:find(gpb_opts, Opts),
     TargetErlDir = filename:join([AppOutDir,
@@ -230,6 +248,10 @@ target_erl_opt(Dir, Opts) ->
 target_hrl_opt(Dir, Opts) ->
     lists:keystore(o_hrl, 1, Opts, {o_hrl, Dir}).
 
+-spec target_nif_opt(string(), proplists:proplist()) -> proplists:proplist().
+target_nif_opt(Dir, Opts) ->
+    lists:keystore(o_nif_cc, 1, Opts, {o_nif_cc, Dir}).
+
 -spec remove_plugin_opts(proplists:proplists()) -> proplists:proplist().
 remove_plugin_opts(Opts) ->
     remove_plugin_opts(Opts, [recursive, ipath]).
@@ -257,3 +279,6 @@ proto_include_paths(_AppDir, [], Opts) -> Opts;
 proto_include_paths(AppDir, [Proto | Protos], Opts) ->
   ProtoDir = filename:join([AppDir, filename:dirname(Proto)]),
   proto_include_paths(AppDir, Protos, Opts ++ [{i, ProtoDir}]).
+
+normalize_path(Dir) ->
+    filename:absname(Dir).
